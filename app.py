@@ -273,7 +273,13 @@ def to_excel_download(sheets_dict, filename):
             df.to_excel(writer, sheet_name=name[:31], index=False)
             worksheet = writer.sheets[name[:31]]
             for i, col in enumerate(df.columns):
-                max_len = max(df[col].astype(str).map(len).max(), len(col)) + 2
+                try:
+                    col_len = df[col].astype(str).str.len().max()
+                    if pd.isna(col_len):
+                        col_len = 0
+                    max_len = max(int(col_len), len(str(col))) + 2
+                except Exception:
+                    max_len = len(str(col)) + 2
                 worksheet.set_column(i, i, min(max_len, 40))
     return output.getvalue()
 
