@@ -1,5 +1,15 @@
-import streamlit as st
 import pandas as pd
+# CRITICAL: Disable Arrow-backed strings BEFORE anything else
+try:
+    pd.options.future.infer_string = False
+except Exception:
+    pass
+try:
+    pd.options.mode.copy_on_write = False
+except Exception:
+    pass
+
+import streamlit as st
 import io
 import traceback
 
