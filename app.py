@@ -1,582 +1,444 @@
-import streamlit as st
+# ──────────────────────────────────────────────────────────────
+import subprocess,sys
+for _p in ["openpyxl","xlsxwriter","plotly"]:
+    try:__import__(_p)
+    except ImportError:subprocess.check_call([sys.executable,"-m","pip","install",_p,"-q"])
 import pandas as pd
-import io
-from collections import Counter
+try:pd.options.future.infer_string=False
+except:pass
+import streamlit as st
+import plotly.graph_objects as go
+import io,traceback as tb
+from datetime import date
+
+st.set_page_config(page_title="Data Quality Report",page_icon="📊",layout="wide",initial_sidebar_state="expanded")
 
 # ──────────────────────────────────────────────────────────────
-# PAGE CONFIG
-# ──────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="Data Quality Report",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
-
-# ──────────────────────────────────────────────────────────────
-# CUSTOM CSS — matches the HTML version's dark header + card theme
+# CSS — modern, clean, p44 themed
 # ──────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* ── Header bar ─────────────────────────────────────────── */
-.main-header {
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-    color: white;
-    padding: 16px 32px;
-    border-radius: 10px;
-    margin-bottom: 20px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-.main-header h1 { font-size: 22px; font-weight: 600; margin: 0; letter-spacing: 0.5px; color: white; }
-.main-header .subtitle { font-size: 12px; opacity: 0.7; margin-top: 2px; }
-.main-header .badge {
-    background: rgba(255,255,255,0.12);
-    padding: 6px 14px;
-    border-radius: 20px;
-    font-size: 13px;
-}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+*{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
 
-/* ── KPI cards ──────────────────────────────────────────── */
-.kpi-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
-.kpi-card {
-    flex: 1; min-width: 130px;
-    background: white;
-    padding: 16px 20px;
-    border-radius: 10px;
-    text-align: center;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-}
-.kpi-card .value { font-size: 28px; font-weight: 700; }
-.kpi-card .label { font-size: 11px; color: #6b778c; text-transform: uppercase; letter-spacing: 0.8px; margin-top: 4px; }
-.kpi-green .value { color: #00875a; }
-.kpi-red .value   { color: #de350b; }
-.kpi-orange .value{ color: #ff991f; }
-.kpi-blue .value  { color: #0046FF; }
+/* Header */
+.hdr{background:linear-gradient(135deg,#0f1629 0%,#1a2744 60%,#0046FF 100%);color:#fff;padding:18px 32px;display:flex;align-items:center;justify-content:space-between;border-radius:12px;margin-bottom:20px;box-shadow:0 4px 20px rgba(0,70,255,.15)}
+.hdr h1{font-size:20px;font-weight:700;color:#fff;margin:0;letter-spacing:.3px}
+.hdr .sub{font-size:11px;opacity:.6;margin-top:2px;font-weight:400}
+.hdr-right{display:flex;align-items:center;gap:10px}
+.hdr-badge{background:rgba(255,255,255,.1);padding:5px 14px;border-radius:20px;font-size:12px;backdrop-filter:blur(4px);border:1px solid rgba(255,255,255,.08)}
+.hdr-cust{font-size:12px;font-weight:500;padding:4px 12px;background:rgba(255,255,255,.08);border-radius:6px;border:1px solid rgba(255,255,255,.06)}
 
-/* ── Status badges ──────────────────────────────────────── */
-.badge-green  { background: #e3fcef; color: #006644; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
-.badge-red    { background: #ffebe6; color: #bf2600; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
-.badge-orange { background: #fff7e6; color: #974f0c; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
-.badge-blue   { background: #deebff; color: #0747a6; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+/* KPI Strip */
+.kpi-row{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:20px}
+@media(max-width:900px){.kpi-row{grid-template-columns:repeat(3,1fr)}}
+.kpi{background:#fff;border-radius:10px;padding:16px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.04);border:1px solid #edf0f3;position:relative;overflow:hidden}
+.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:10px 10px 0 0}
+.kpi.k-blue::before{background:linear-gradient(90deg,#0046FF,#4d8bff)}
+.kpi.k-green::before{background:linear-gradient(90deg,#00875a,#36b37e)}
+.kpi.k-emerald::before{background:linear-gradient(90deg,#006644,#00875a)}
+.kpi.k-orange::before{background:linear-gradient(90deg,#ff8b00,#ff991f)}
+.kpi.k-red::before{background:linear-gradient(90deg,#bf2600,#de350b)}
+.kpi.k-purple::before{background:linear-gradient(90deg,#5243aa,#6554c0)}
+.kpi .kv{font-size:26px;font-weight:800;margin-top:4px}
+.kpi .kl{font-size:9.5px;color:#7a869a;text-transform:uppercase;letter-spacing:.8px;margin-top:6px;font-weight:600}
+.kpi .kd{font-size:10px;color:#97a0af;margin-top:2px;font-weight:400}
+.k-blue .kv{color:#0046FF}.k-green .kv{color:#00875a}.k-emerald .kv{color:#006644}
+.k-orange .kv{color:#ff8b00}.k-red .kv{color:#bf2600}.k-purple .kv{color:#5243aa}
 
-/* ── Section cards ──────────────────────────────────────── */
-.section-card {
-    background: white;
-    border-radius: 10px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-    padding: 20px;
-    margin-bottom: 16px;
-}
-.section-card h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; color: #172b4d; }
+/* Cards */
+.card{background:#fff;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.04);margin-bottom:14px;overflow:hidden;border:1px solid #edf0f3}
+.card-h{padding:14px 18px;border-bottom:1px solid #edf0f3;display:flex;align-items:center;justify-content:space-between}
+.card-h h3{font-size:13px;font-weight:700;margin:0;color:#172b4d;letter-spacing:.2px}
+.card-h .cnt{font-size:11px;color:#7a869a;font-weight:500}
+.card-b{padding:0}
 
-/* ── Table styling ──────────────────────────────────────── */
-.dataframe { font-size: 13px !important; }
-div[data-testid="stDataFrame"] { border-radius: 8px; overflow: hidden; }
+/* Badges */
+.b{display:inline-block;padding:3px 9px;border-radius:10px;font-size:10.5px;font-weight:600;white-space:nowrap;letter-spacing:.2px}
+.b-g{background:#e3fcef;color:#006644}.b-r{background:#ffebe6;color:#bf2600}
+.b-o{background:#fff7e6;color:#974f0c}.b-bl{background:#deebff;color:#0747a6}
+.b-pu{background:#eae6ff;color:#403294}
 
-/* ── Streamlit overrides ────────────────────────────────── */
-.block-container { padding-top: 1rem; }
-div[data-testid="stTabs"] button { font-weight: 500; }
-div[data-testid="stMetric"] { background: white; padding: 16px; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-div[data-testid="stMetric"] label { font-size: 11px !important; text-transform: uppercase; letter-spacing: 0.8px; }
+/* Pct bar */
+.pc{display:flex;align-items:center;gap:6px}
+.pb{display:inline-block;height:6px;border-radius:3px;min-width:3px}
 
-/* Hide Streamlit footer and menu */
-#MainMenu {visibility: hidden;}
-footer {visibility: hidden;}
+/* Sidebar */
+section[data-testid="stSidebar"]{background:linear-gradient(180deg,#f8f9fb,#fff);border-right:1px solid #edf0f3}
+section[data-testid="stSidebar"] .stSelectbox label{font-size:11px;font-weight:700;color:#7a869a;text-transform:uppercase;letter-spacing:.6px}
+section[data-testid="stSidebar"] h3{font-size:14px;color:#172b4d}
+
+/* Streamlit */
+.block-container{padding-top:0!important;max-width:1440px}
+div[data-testid="stTabs"] button[role="tab"]{font-size:13px;font-weight:600;padding:12px 22px}
+#MainMenu{visibility:hidden}footer{visibility:hidden}header{visibility:hidden}
 </style>
-""", unsafe_allow_html=True)
+""",unsafe_allow_html=True)
 
 
 # ──────────────────────────────────────────────────────────────
-# DATA PROCESSING — same Power Query logic as HTML version
+# HELPERS
 # ──────────────────────────────────────────────────────────────
-def find_col(df, candidates):
-    """Flexibly find column name from list of candidates."""
-    cols_lower = {c.lower().strip(): c for c in df.columns}
-    for cand in candidates:
-        cl = cand.lower().strip()
-        if cl in cols_lower:
-            return cols_lower[cl]
-    # Partial match
-    for cand in candidates:
-        cl = cand.lower().strip()
-        for k, v in cols_lower.items():
-            if cl in k:
-                return v
+def ss(v):
+    if v is None:return ''
+    if isinstance(v,float) and pd.isna(v):return ''
+    s=str(v).strip()
+    return '' if s in ('nan','None','NaT','NaN') else s
+def su(v):return ss(v).upper()
+def find_col(df,cands):
+    lo={c.lower().strip():c for c in df.columns}
+    for c in cands:
+        if c.lower().strip() in lo:return lo[c.lower().strip()]
+    for c in cands:
+        cl=c.lower().strip()
+        for k,v in lo.items():
+            if cl in k:return v
     return None
 
 
-def process_data(df):
-    """Apply Power Query transformation logic."""
-
-    # ── Step 1: Filter out empty rows ───────────────────────
-    carrier_col = find_col(df, ['Carrier Name'])
-    bol_col = find_col(df, ['Bill of Lading'])
-    tracked_col = find_col(df, ['Tracked'])
-
-    if carrier_col is None and bol_col is None:
-        st.error("Could not find 'Carrier Name' or 'Bill of Lading' columns. Please check your file.")
-        return None, None
-
-    mask = pd.Series([False] * len(df))
-    if carrier_col:
-        mask = mask | df[carrier_col].notna().astype(bool) & (df[carrier_col] != '')
-    if bol_col:
-        mask = mask | df[bol_col].notna().astype(bool) & (df[bol_col] != '')
-    if tracked_col:
-        mask = mask | df[tracked_col].notna().astype(bool) & (df[tracked_col] != '')
-
-    df = df[mask].reset_index(drop=True)
-
-    # ── Step 2: Build Query dataframe ───────────────────────
-    def gcol(candidates):
-        c = find_col(df, candidates)
-        return df[c] if c else pd.Series([''] * len(df))
-
-    pickup_name = gcol(['Pickup Name'])
-    pickup_cs = gcol(['Pickup City State'])
-    pickup_country = gcol(['Pickup Country'])
-    dest_name = gcol(['Final Destination Name'])
-    dest_cs = gcol(['Final Destination City State'])
-    dest_country = gcol(['Final Destination Country'])
-
-    query_df = pd.DataFrame({
-        'Carrier Name': gcol(['Carrier Name']),
-        'Bill of Lading': gcol(['Bill of Lading']),
-        'Order Number': gcol(['Order Number']),
-        'Tracked': gcol(['Tracked']),
-        'Connection Type': gcol(['Connection Type']),
-        'Tracking Method': gcol(['Tracking Method']),
-        'Active Equipment ID': gcol(['Active Equipment ID']),
-        'Historical Equipment ID': gcol(['Historical Equipment ID']),
-        'Pickup Name': pickup_name,
-        'Pickup Location': pickup_name.astype(str).str.cat([pickup_cs.astype(str), pickup_country.astype(str)], sep=','),
-        'Pickup City State': pickup_cs,
-        'Pickup Country': pickup_country,
-        'Pickup Appointement Window (UTC)': gcol(['Pickup Appointement Window (UTC)', 'Pickup Appointment Window']),
-        'Final Destination Name': dest_name,
-        'Final Destination City State': dest_cs,
-        'Final Destination Country': dest_country,
-        'Delivery Appointement Window (UTC)': gcol(['Delivery Appointement Window (UTC)', 'Delivery Appointment Window']),
-        'Shipment Created (UTC)': gcol(['Shipment Created (UTC)', 'Shipment Created']),
-        'Tracking Window Start (UTC)': gcol(['Tracking Window Start (UTC)', 'Tracking Window Start']),
-        'Tracking Window End (UTC)': gcol(['Tracking Window End (UTC)', 'Tracking Window End']),
-        'Pickup Arrival Milestone (UTC)': gcol(['Pickup Arrival Milestone (UTC)', 'Pickup Arrival Milestone']),
-        'Pickup Departure Milestone (UTC)': gcol(['Pickup Departure Milestone (UTC)', 'Pickup Departure Milestone']),
-        'Final Destination Arrival Milestone (UTC)': gcol(['Final Destination Arrival Milestone (UTC)', 'Final Destination Arrival Milestone']),
-        'Final Destination Departure Milestone (UTC)': gcol(['Final Destination Departure Milestone (UTC)', 'Final Destination Departure Milestone']),
-        '# Of Milestones received / # Of Milestones expected': gcol(['# Of Milestones received / # Of Milestones expected']),
-        '# Updates Received': gcol(['# Updates Received']),
-        '# Updates Received < 10 mins': gcol(['# Updates Received < 10 mins']),
-        'Nb Intervals Expected': gcol(['Nb Intervals Expected']),
-        'Nb Intervals Observed': gcol(['Nb Intervals Observed']),
-        'Final Status Reason': gcol(['Final Status Reason']),
-        'Tracking Error': gcol(['Tracking Error']),
-        'Milestone Error 1': gcol(['Milestone Error 1']),
-        'Milestone Error 2': gcol(['Milestone Error 2']),
-        'Milestone Error 3': gcol(['Milestone Error 3']),
-    })
-
-    # ── Step 3: Build Analysis dataframe ────────────────────
-    def has_milestone(val):
-        if pd.isna(val):
-            return False
-        s = str(val).strip()
-        return s not in ('', '0', 'UNKNOWN', 'None', 'nan', 'NaT')
-
-    records = []
-    for idx, row in query_df.iterrows():
-        tracked = str(row['Tracked']).strip().upper() == 'TRUE'
-
-        m1 = has_milestone(row['Pickup Arrival Milestone (UTC)'])
-        m2 = has_milestone(row['Pickup Departure Milestone (UTC)'])
-        m3 = has_milestone(row['Final Destination Arrival Milestone (UTC)'])
-        m4 = has_milestone(row['Final Destination Departure Milestone (UTC)'])
-
-        achieved = []
-        missed = []
-        for flag, label in [(m1, 'm1'), (m2, 'm2'), (m3, 'm3'), (m4, 'm4')]:
-            (achieved if flag else missed).append(label)
-
-        total_achieved = len(achieved)
-
-        if tracked and total_achieved == 4:
-            tracked_status = 'Full Tracked'
-            milestone_missed = 'Fully Tracked'
-            analysis = ''
-            p44_analysis = 'Full Tracked'
-        elif tracked and total_achieved > 0:
-            tracked_status = 'Partial Tracked'
-            milestone_missed = ', '.join(missed)
-            analysis = ''
-            p44_analysis = 'Partial Tracked'
-        elif tracked and total_achieved == 0:
-            tracked_status = 'Tracked with 0 milestones'
-            milestone_missed = 'm1, m2, m3, m4'
-            analysis = ''
-            p44_analysis = 'Tracked with 0 milestones'
-        else:
-            tracked_status = 'Tracked with 0 milestones'
-            milestone_missed = 'm1, m2, m3, m4'
-            err = str(row['Tracking Error']) if pd.notna(row['Tracking Error']) else ''
-            analysis = err
-            p44_analysis = err if err else 'Tracked with 0 milestones'
-
-        pcs = str(row['Pickup City State']) if pd.notna(row['Pickup City State']) else ''
-        dcs = str(row['Final Destination City State']) if pd.notna(row['Final Destination City State']) else ''
-        lane = f"{pcs} -> {dcs}" if pcs and dcs else ''
-
-        dn = str(row['Final Destination Name']) if pd.notna(row['Final Destination Name']) else ''
-        dc = str(row['Final Destination Country']) if pd.notna(row['Final Destination Country']) else ''
-        dest_loc = ','.join(filter(None, [dn, dcs, dc]))
-
-        records.append({
-            'Carrier Name': row['Carrier Name'],
-            'Bill of Lading': row['Bill of Lading'],
-            'Order Number': row['Order Number'],
-            'Tracked': row['Tracked'],
-            'Connection Type': row['Connection Type'],
-            'Tracking Method': row['Tracking Method'],
-            'Active Equipment ID': row['Active Equipment ID'],
-            'Historical Equipment ID': row['Historical Equipment ID'],
-            'Lanes': lane,
-            'Pickup Location': row['Pickup Location'],
-            'Destination Location': dest_loc,
-            'Pickup Appointement Window (UTC)': row['Pickup Appointement Window (UTC)'],
-            'Delivery Appointement Window (UTC)': row['Delivery Appointement Window (UTC)'],
-            'Shipment Created (UTC)': row['Shipment Created (UTC)'],
-            'Tracking Window Start (UTC)': row['Tracking Window Start (UTC)'],
-            'Tracking Window End (UTC)': row['Tracking Window End (UTC)'],
-            'Pickup Arrival Milestone (UTC)': row['Pickup Arrival Milestone (UTC)'],
-            'Pickup Departure Milestone (UTC)': row['Pickup Departure Milestone (UTC)'],
-            'Final Destination Arrival Milestone (UTC)': row['Final Destination Arrival Milestone (UTC)'],
-            'Final Destination Departure Milestone (UTC)': row['Final Destination Departure Milestone (UTC)'],
-            'Final Status Reason': row['Final Status Reason'],
-            'Tracked Status': tracked_status,
-            'Milstone Completeness': '4/4',
-            'Milestone Achieved': ', '.join(achieved) if achieved else '',
-            'Milestone Missed': milestone_missed,
-            'Analysis': analysis,
-            'p44 Analysis': p44_analysis,
-        })
-
-    analysis_df = pd.DataFrame(records)
-    return query_df, analysis_df
-
-
-def to_excel_download(sheets_dict, filename):
-    """Create downloadable Excel with multiple sheets."""
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        for name, df in sheets_dict.items():
-            df.to_excel(writer, sheet_name=name[:31], index=False)
-            worksheet = writer.sheets[name[:31]]
-            for i, col in enumerate(df.columns):
-                max_len = max(df[col].astype(str).map(len).max(), len(col)) + 2
-                worksheet.set_column(i, i, min(max_len, 40))
-    return output.getvalue()
-
-
-def badge_html(text, color='green'):
-    return f'<span class="badge-{color}">{text}</span>'
+# ──────────────────────────────────────────────────────────────
+# PROCESS
+# ──────────────────────────────────────────────────────────────
+def process(df):
+    cc=find_col(df,['Carrier Name']);bc=find_col(df,['Bill of Lading']);tc=find_col(df,['Tracked'])
+    if cc is None and bc is None:st.error("Cannot find required columns.");return None,None
+    keep=[]
+    for i in range(len(df)):
+        r=df.iloc[i];ok=False
+        if cc and ss(r.get(cc,'')):ok=True
+        if bc and ss(r.get(bc,'')):ok=True
+        if tc and ss(r.get(tc,'')):ok=True
+        keep.append(ok)
+    df=df[keep].reset_index(drop=True);n=len(df)
+    def gc(cands):
+        c=find_col(df,cands)
+        return [ss(df.iloc[i][c]) for i in range(n)] if c else ['']*n
+    cn=gc(['Carrier Name']);bl=gc(['Bill of Lading']);on=gc(['Order Number']);tr=gc(['Tracked'])
+    ct=gc(['Connection Type']);tm=gc(['Tracking Method']);ae=gc(['Active Equipment ID']);he=gc(['Historical Equipment ID'])
+    pn=gc(['Pickup Name']);pcs=gc(['Pickup City State']);pc=gc(['Pickup Country'])
+    dn=gc(['Final Destination Name']);dcs=gc(['Final Destination City State']);dc=gc(['Final Destination Country'])
+    paw=gc(['Pickup Appointement Window (UTC)','Pickup Appointment Window'])
+    daw=gc(['Delivery Appointement Window (UTC)','Delivery Appointment Window'])
+    scr=gc(['Shipment Created (UTC)','Shipment Created'])
+    tws=gc(['Tracking Window Start (UTC)','Tracking Window Start']);twe=gc(['Tracking Window End (UTC)','Tracking Window End'])
+    m1r=gc(['Pickup Arrival Milestone (UTC)','Pickup Arrival Milestone'])
+    m2r=gc(['Pickup Departure Milestone (UTC)','Pickup Departure Milestone'])
+    m3r=gc(['Final Destination Arrival Milestone (UTC)','Final Destination Arrival'])
+    m4r=gc(['Final Destination Departure Milestone (UTC)','Final Destination Departure'])
+    mre=gc(['# Of Milestones received / # Of Milestones expected'])
+    ur=gc(['# Updates Received']);u10=gc(['# Updates Received < 10 mins'])
+    nie=gc(['Nb Intervals Expected']);nio=gc(['Nb Intervals Observed'])
+    fsr=gc(['Final Status Reason']);ter=gc(['Tracking Error'])
+    me1=gc(['Milestone Error 1']);me2=gc(['Milestone Error 2']);me3=gc(['Milestone Error 3'])
+    def hm(v):return v not in ('','0','UNKNOWN')
+    qrows,arows=[],[]
+    for i in range(n):
+        pl=','.join(filter(None,[pn[i],pcs[i],pc[i]]));dl=','.join(filter(None,[dn[i],dcs[i],dc[i]]))
+        qrows.append({'Carrier Name':cn[i],'Bill of Lading':bl[i],'Order Number':on[i],'Tracked':tr[i],'Connection Type':ct[i],'Tracking Method':tm[i],'Active Equipment ID':ae[i],'Historical Equipment ID':he[i],'Pickup Name':pn[i],'Pickup Location':pl,'Pickup City State':pcs[i],'Pickup Country':pc[i],'Pickup Appointement Window (UTC)':paw[i],'Final Destination Name':dn[i],'Final Destination City State':dcs[i],'Final Destination Country':dc[i],'Delivery Appointement Window (UTC)':daw[i],'Shipment Created (UTC)':scr[i],'Tracking Window Start (UTC)':tws[i],'Tracking Window End (UTC)':twe[i],'Pickup Arrival Milestone (UTC)':m1r[i],'Pickup Departure Milestone (UTC)':m2r[i],'Final Destination Arrival Milestone (UTC)':m3r[i],'Final Destination Departure Milestone (UTC)':m4r[i],'# Of Milestones received / # Of Milestones expected':mre[i],'# Updates Received':ur[i],'# Updates Received < 10 mins':u10[i],'Nb Intervals Expected':nie[i],'Nb Intervals Observed':nio[i],'Final Status Reason':fsr[i],'Tracking Error':ter[i],'Milestone Error 1':me1[i],'Milestone Error 2':me2[i],'Milestone Error 3':me3[i]})
+        trkd=tr[i].upper()=='TRUE';a1,a2,a3,a4=hm(m1r[i]),hm(m2r[i]),hm(m3r[i]),hm(m4r[i])
+        ach=[l for f,l in [(a1,'m1'),(a2,'m2'),(a3,'m3'),(a4,'m4')] if f]
+        mis=[l for f,l in [(a1,'m1'),(a2,'m2'),(a3,'m3'),(a4,'m4')] if not f]
+        nc=len(ach)
+        if trkd and nc==4:ts,mm,ana,p44='Full Tracked','Fully Tracked','','Full Tracked'
+        elif trkd and nc>0:ts,mm,ana,p44='Partial Tracked',', '.join(mis),'','Partial Tracked'
+        elif trkd:ts,mm,ana,p44='Tracked with 0 milestones','m1, m2, m3, m4','','Tracked with 0 milestones'
+        else:e=ter[i];ts='Tracked with 0 milestones';mm='m1, m2, m3, m4';ana=e;p44=e if e else 'Tracked with 0 milestones'
+        lane=f"{pcs[i]} -> {dcs[i]}" if pcs[i] and dcs[i] else ''
+        arows.append({'Carrier Name':cn[i],'Bill of Lading':bl[i],'Order Number':on[i],'Tracked':tr[i],'Connection Type':ct[i],'Tracking Method':tm[i],'Active Equipment ID':ae[i],'Historical Equipment ID':he[i],'Lanes':lane,'Pickup Location':pl,'Destination Location':dl,'Pickup Appointement Window (UTC)':paw[i],'Delivery Appointement Window (UTC)':daw[i],'Shipment Created (UTC)':scr[i],'Tracking Window Start (UTC)':tws[i],'Tracking Window End (UTC)':twe[i],'Pickup Arrival Milestone (UTC)':m1r[i],'Pickup Departure Milestone (UTC)':m2r[i],'Final Destination Arrival Milestone (UTC)':m3r[i],'Final Destination Departure Milestone (UTC)':m4r[i],'Final Status Reason':fsr[i],'Tracked Status':ts,'Milstone Completeness':'4/4','Milestone Achieved':', '.join(ach) if ach else '','Milestone Missed':mm,'Analysis':ana,'p44 Analysis':p44,'Tracking Error':ter[i]})
+    return pd.DataFrame(qrows),pd.DataFrame(arows)
 
 
 # ──────────────────────────────────────────────────────────────
-# MAIN APP
+# EXCEL
+# ──────────────────────────────────────────────────────────────
+def to_xl(sheets):
+    buf=io.BytesIO()
+    with pd.ExcelWriter(buf,engine='xlsxwriter') as w:
+        for nm,df in sheets.items():
+            sn=nm[:31];df.to_excel(w,sheet_name=sn,index=False);ws=w.sheets[sn]
+            for i,c in enumerate(df.columns):
+                try:ml=max(max(len(ss(v)) for v in df.iloc[:,i].tolist()),0) if len(df)>0 else 0
+                except:ml=0
+                ws.set_column(i,i,min(max(ml,len(str(c)))+2,45))
+    return buf.getvalue()
+
+
+# ──────────────────────────────────────────────────────────────
+# PIVOTS
+# ──────────────────────────────────────────────────────────────
+def _cnt(lst):
+    d={}
+    for v in lst:d[v]=d.get(v,0)+1
+    return d
+def pv_track(a):
+    t=len(a);c=_cnt([su(v) for v in a['Tracked'].tolist()])
+    r=[{'Tracked':k,'Shipments':v,'Shipment %':f"{v/t*100:.1f}%"} for k,v in sorted(c.items(),key=lambda x:-x[1])]
+    r.append({'Tracked':'Grand Total','Shipments':t,'Shipment %':'100%'});return pd.DataFrame(r)
+def pv_track_carr(a):
+    t=len(a);c={}
+    for i in range(len(a)):k=(su(a.iloc[i]['Tracked']),ss(a.iloc[i]['Carrier Name']));c[k]=c.get(k,0)+1
+    return pd.DataFrame([{'Tracked':k[0],'Carrier Name':k[1],'Shipments':v,'Shipment %':f"{v/t*100:.1f}%"} for k,v in sorted(c.items(),key=lambda x:-x[1])])
+def pv_ms(a):
+    t=len(a);c=_cnt([ss(v) for v in a['Tracked Status'].tolist()])
+    return pd.DataFrame([{'Tracked Status':s,'Shipments':c.get(s,0),'Shipment %':f"{c.get(s,0)/t*100:.1f}%"} for s in ['Full Tracked','Partial Tracked','Tracked with 0 milestones']]+[{'Tracked Status':'Grand Total','Shipments':t,'Shipment %':'100%'}])
+def pv_rca(a):
+    t=len(a);c=_cnt([ss(v) for v in a['p44 Analysis'].tolist()])
+    r=[{'P44 Analysis':k,'Shipments':v,'Shipment %':f"{v/t*100:.1f}%"} for k,v in sorted(c.items(),key=lambda x:-x[1])]
+    r.append({'P44 Analysis':'Grand Total','Shipments':t,'Shipment %':'100%'});return pd.DataFrame(r)
+def pv_mc(a):
+    t=len(a);c={}
+    for i in range(len(a)):k=(ss(a.iloc[i]['Carrier Name']),ss(a.iloc[i]['Milestone Missed']));c[k]=c.get(k,0)+1
+    return pd.DataFrame([{'Carrier Name':k[0],'Milestone Missed':k[1],'Shipments':v,'Shipment %':f"{v/t*100:.1f}%"} for k,v in sorted(c.items(),key=lambda x:-x[1])])
+def pv_lane(a):
+    t=len(a);c={}
+    for i in range(len(a)):k=(ss(a.iloc[i]['Lanes']),ss(a.iloc[i]['Carrier Name']),ss(a.iloc[i]['Milestone Missed']));c[k]=c.get(k,0)+1
+    return pd.DataFrame([{'Lanes':k[0],'Carrier Name':k[1],'Milestone Missed':k[2],'Shipments':v,'Shipment %':f"{v/t*100:.1f}%"} for k,v in sorted(c.items(),key=lambda x:-x[1])])
+
+
+# ──────────────────────────────────────────────────────────────
+# CHARTS
+# ──────────────────────────────────────────────────────────────
+CC={'g':'#00875a','r':'#de350b','o':'#ff8b00','b':'#0046FF','p':'#6554c0'}
+CL=dict(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(0,0,0,0)',margin=dict(l=8,r=8,t=8,b=8),font=dict(family='Inter',size=11,color='#172b4d'))
+
+def ch_donut(labels,values,colors):
+    fig=go.Figure(go.Pie(labels=labels,values=values,hole=.62,marker=dict(colors=colors,line=dict(color='#fff',width=2)),textinfo='label+percent',textfont=dict(size=10),pull=[0]+[.02]*(len(labels)-1)))
+    fig.update_layout(**CL,height=200,showlegend=False);return fig
+
+def ch_hbar(items,colors):
+    fig=go.Figure(go.Bar(x=[v for _,v in items],y=[k[:35] for k,_ in items],orientation='h',marker_color=colors,text=[f'{v}' for _,v in items],textposition='outside',textfont=dict(size=10)))
+    h=max(180,len(items)*26+50)
+    fig.update_layout(**CL,height=h,yaxis=dict(autorange='reversed',tickfont=dict(size=9.5)),xaxis=dict(showgrid=True,gridcolor='#f4f5f7',zeroline=False),bargap=.35);return fig
+
+def ch_track(a):
+    tl=[su(v) for v in a['Tracked'].tolist()]
+    return ch_donut(['Tracked','Untracked'],[sum(1 for x in tl if x=='TRUE'),sum(1 for x in tl if x!='TRUE')],[CC['g'],CC['r']])
+
+def ch_ms(a):
+    sl=[ss(v) for v in a['Tracked Status'].tolist()]
+    return ch_donut(['Full','Partial','Untracked'],[sum(1 for x in sl if x=='Full Tracked'),sum(1 for x in sl if x=='Partial Tracked'),sum(1 for x in sl if x=='Tracked with 0 milestones')],[CC['g'],CC['o'],CC['r']])
+
+def ch_rca(a):
+    c=_cnt([ss(v) for v in a['p44 Analysis'].tolist()])
+    it=sorted(c.items(),key=lambda x:-x[1])
+    cols=[CC['g'] if k=='Full Tracked' else CC['o'] if k=='Partial Tracked' else CC['b'] if 'milestones' in k.lower() else CC['r'] for k,_ in it]
+    return ch_hbar(it,cols)
+
+def ch_carrier(a):
+    c={}
+    for i in range(len(a)):
+        cn=ss(a.iloc[i]['Carrier Name']);ts=ss(a.iloc[i]['Tracked Status'])
+        if cn not in c:c[cn]={'Full Tracked':0,'Partial Tracked':0,'Tracked with 0 milestones':0}
+        if ts in c[cn]:c[cn][ts]+=1
+    top=sorted(c.keys(),key=lambda x:-sum(c[x].values()))[:10]
+    fig=go.Figure()
+    for s,cl in [('Full Tracked',CC['g']),('Partial Tracked',CC['o']),('Tracked with 0 milestones',CC['r'])]:
+        fig.add_trace(go.Bar(name=s,y=[cn[:22] for cn in top],x=[c[cn].get(s,0) for cn in top],orientation='h',marker_color=cl))
+    h=max(200,len(top)*26+60)
+    fig.update_layout(**CL,barmode='stack',height=h,yaxis=dict(autorange='reversed',tickfont=dict(size=9.5)),xaxis=dict(showgrid=True,gridcolor='#f4f5f7',zeroline=False),legend=dict(orientation='h',y=-0.25,font=dict(size=9.5)));return fig
+
+
+# ──────────────────────────────────────────────────────────────
+# BADGES & TABLE
+# ──────────────────────────────────────────────────────────────
+def bg(t,c):return f'<span class="b b-{c}">{t}</span>'
+def b_tr(v):return bg(v,'g') if su(v)=='TRUE' else bg(v,'r')
+def b_st(v):return bg(v,'g') if v=='Full Tracked' else bg(v,'o') if v=='Partial Tracked' else bg(v,'r')
+def b_mm(v):return bg(v,'g') if v=='Fully Tracked' else bg(v,'o')
+def b_p4(v):
+    if v=='Full Tracked':return bg(v,'g')
+    if v=='Partial Tracked':return bg(v,'o')
+    if 'milestones' in ss(v).lower():return bg(v,'bl')
+    return bg(v,'r')
+def pbar(p,c='#00875a'):return f'<div class="pc"><span class="pb" style="width:{max(p,2):.0f}px;background:{c}"></span>{p:.1f}%</div>'
+
+def ht(df,mh=350):
+    h=f'<div style="max-height:{mh}px;overflow:auto;border-radius:0 0 8px 8px"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+    h+='<thead><tr>'
+    for c in df.columns:h+=f'<th style="background:#f8f9fb;padding:9px 12px;text-align:left;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#7a869a;border-bottom:2px solid #edf0f3;white-space:nowrap;position:sticky;top:0;z-index:1">{c}</th>'
+    h+='</tr></thead><tbody>'
+    for i in range(len(df)):
+        r=df.iloc[i];tot='Total' in ss(r.iloc[0])
+        s='background:#f4f5f7;font-weight:700;border-top:2px solid #dfe1e6' if tot else ''
+        h+=f'<tr style="{s}">'
+        for v in r:h+=f'<td style="padding:8px 12px;border-bottom:1px solid #f4f5f7;white-space:nowrap">{ss(v)}</td>'
+        h+='</tr>'
+    h+='</tbody></table></div>';return h
+
+def flt(df,col,val,exact=False):
+    m=[ss(df.iloc[i][col])==val if exact else su(df.iloc[i][col])==val.upper() for i in range(len(df))]
+    return df[m].reset_index(drop=True)
+
+
+# ──────────────────────────────────────────────────────────────
+# MAIN
 # ──────────────────────────────────────────────────────────────
 def main():
-    # ── Header ──────────────────────────────────────────────
-    st.markdown("""
-    <div class="main-header">
-        <div>
-            <h1>📊 Data Quality Report</h1>
-            <div class="subtitle">project44 Visibility Platform</div>
-        </div>
-        <div>
-            <span class="badge">Powered by p44</span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    today=date.today().strftime('%b %d, %Y')
+    cust=st.session_state.get('cust','')
+    st.markdown(f'<div class="hdr"><div><h1>Data Quality Report</h1><div class="sub">project44 Visibility Platform</div></div><div class="hdr-right"><span class="hdr-cust">{cust}</span><span class="hdr-badge">{today}</span></div></div>',unsafe_allow_html=True)
 
-    # ── File Upload ─────────────────────────────────────────
-    if 'processed' not in st.session_state:
-        st.session_state.processed = False
+    if 'ok' not in st.session_state:st.session_state.ok=False
+    up=st.file_uploader("Upload your weekly data export (.xlsx)",type=['xlsx','xls','csv'],label_visibility="collapsed")
 
-    uploaded_file = st.file_uploader(
-        "Upload your weekly data export (.xlsx)",
-        type=['xlsx', 'xls', 'csv'],
-        help="Upload the raw data export from the p44 platform. The system will automatically process and generate reports."
-    )
-
-    if uploaded_file is not None and not st.session_state.processed:
-        with st.spinner("Processing data..."):
+    if up and not st.session_state.ok:
+        with st.spinner("Processing data…"):
             try:
-                if uploaded_file.name.endswith('.csv'):
-                    raw_df = pd.read_csv(uploaded_file)
+                if up.name.endswith('.csv'):raw=pd.read_csv(up)
                 else:
-                    # Try to read "Data" sheet first, fall back to first sheet
-                    xls = pd.ExcelFile(uploaded_file)
-                    sheet = 'Data' if 'Data' in xls.sheet_names else xls.sheet_names[0]
-                    raw_df = pd.read_excel(uploaded_file, sheet_name=sheet)
-
-                query_df, analysis_df = process_data(raw_df)
-                if query_df is not None:
-                    st.session_state.query_df = query_df
-                    st.session_state.analysis_df = analysis_df
-                    st.session_state.processed = True
-                    # Detect customer name
-                    cust_col = find_col(raw_df, ['Customer Tenant Name', 'Tenant Name'])
-                    if cust_col:
-                        names = raw_df[cust_col].dropna().unique()
-                        st.session_state.customer = names[0] if len(names) > 0 else ''
-                    else:
-                        st.session_state.customer = ''
+                    xls=pd.ExcelFile(up,engine='openpyxl');sh='Data' if 'Data' in xls.sheet_names else xls.sheet_names[0]
+                    raw=pd.read_excel(xls,sheet_name=sh,engine='openpyxl')
+                q,a=process(raw)
+                if q is not None:
+                    st.session_state.q=q;st.session_state.a=a;st.session_state.ok=True
+                    cc=find_col(raw,['Customer Tenant Name'])
+                    st.session_state.cust=ss(raw[cc].dropna().iloc[0]) if cc and len(raw[cc].dropna())>0 else ''
                     st.rerun()
-            except Exception as e:
-                st.error(f"Error processing file: {e}")
-                return
+            except Exception as e:st.error(f"Error: {e}");st.code(tb.format_exc());return
 
-    if not st.session_state.processed:
-        st.info("👆 Upload your data file to generate the report")
+    if not st.session_state.ok:
+        st.markdown('<div style="text-align:center;padding:60px 20px"><div style="font-size:48px;margin-bottom:12px">📊</div><h2 style="font-size:18px;margin-bottom:6px;color:#172b4d">Upload Data Quality Report</h2><p style="font-size:13px;color:#7a869a;max-width:420px;margin:0 auto">Drop your weekly .xlsx export above. The system will process and generate Tracking & Milestone reports automatically.</p></div>',unsafe_allow_html=True)
         return
 
-    # ── Data loaded — show report ───────────────────────────
-    query_df = st.session_state.query_df
-    analysis_df = st.session_state.analysis_df
-    customer = st.session_state.get('customer', '')
+    q=st.session_state.q;a_full=st.session_state.a
 
-    # Reset button
-    col_r1, col_r2 = st.columns([8, 2])
-    with col_r2:
-        if st.button("↺ Upload New File", type="secondary", use_container_width=True):
-            st.session_state.processed = False
-            st.session_state.pop('query_df', None)
-            st.session_state.pop('analysis_df', None)
+    # ── SIDEBAR ─────────────────────────────────────────────
+    with st.sidebar:
+        st.markdown("### 🔍 Global Filters")
+        st.caption("Applied to all tabs, KPIs, and charts")
+        carrs_all=sorted(set(ss(v) for v in a_full['Carrier Name'].tolist() if ss(v)))
+        f_tracked=st.selectbox("Tracked",["All","TRUE","FALSE"],key="gf_t")
+        f_status=st.selectbox("Tracked Status",["All","Full Tracked","Partial Tracked","Tracked with 0 milestones"],key="gf_s")
+        f_carrier=st.selectbox("Carrier",["All"]+carrs_all,key="gf_c")
+        lanes_all=sorted(set(ss(v) for v in a_full['Lanes'].tolist() if ss(v)))
+        f_lane=st.selectbox("Lane",["All"]+lanes_all,key="gf_l")
+
+        st.divider()
+        if st.button("↺ Upload New File",use_container_width=True):
+            for k in ['ok','q','a','cust']:st.session_state.pop(k,None)
             st.rerun()
 
-    # ── KPI Strip ───────────────────────────────────────────
-    total = len(analysis_df)
-    tracked_true = len(analysis_df[analysis_df['Tracked'].astype(str).str.upper() == 'TRUE'])
-    full_tracked = len(analysis_df[analysis_df['Tracked Status'] == 'Full Tracked'])
-    partial = len(analysis_df[analysis_df['Tracked Status'] == 'Partial Tracked'])
-    zero_ms = len(analysis_df[analysis_df['Tracked Status'] == 'Tracked with 0 milestones'])
-    tracking_pct = (tracked_true / total * 100) if total else 0
-    full_pct = (full_tracked / total * 100) if total else 0
+        st.divider()
+        st.markdown("##### 📥 Exports")
+        st.download_button("⬇ Export All to Excel",to_xl({'Query':q,'Data Analysis':a_full,'DQ-Tracking':pv_track(a_full),'Tracking Carrier':pv_track_carr(a_full),'DQ-Milestone':pv_ms(a_full),'P44 RCA':pv_rca(a_full),'Lane Analysis':pv_lane(a_full),'MS Carrier':pv_mc(a_full)}),"DQ-Report-Full.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True,type="primary")
+        st.download_button("⬇ Tracking Report",to_xl({'DQ-Tracking':pv_track(a_full),'Carrier':pv_track_carr(a_full),'Detail':a_full[['Carrier Name','Bill of Lading','Tracked','Connection Type','Tracking Method','Lanes','Pickup Location','Destination Location','Final Status Reason','Tracked Status','Tracking Error']]}),"DQ-Tracking.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+        st.download_button("⬇ Milestone Report",to_xl({'DQ-Milestone':pv_ms(a_full),'P44 RCA':pv_rca(a_full),'MS Carrier':pv_mc(a_full),'Lane':pv_lane(a_full),'Detail':a_full}),"DQ-Milestone.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
 
-    k1, k2, k3, k4, k5, k6 = st.columns(6)
-    k1.metric("Total Shipments", f"{total:,}")
-    k2.metric("Tracked (TRUE)", f"{tracking_pct:.1f}%")
-    k3.metric("Full Tracked", f"{full_tracked:,}")
-    k4.metric("Partial Tracked", f"{partial:,}")
-    k5.metric("0 Milestones", f"{zero_ms:,}")
-    k6.metric("Full Track Rate", f"{full_pct:.1f}%")
+    # Apply filters
+    a=a_full.copy()
+    if f_tracked!="All":a=flt(a,'Tracked',f_tracked)
+    if f_status!="All":a=flt(a,'Tracked Status',f_status,True)
+    if f_carrier!="All":a=flt(a,'Carrier Name',f_carrier,True)
+    if f_lane!="All":a=flt(a,'Lanes',f_lane,True)
+    qf=q.copy()
+    if f_tracked!="All":qf=flt(qf,'Tracked',f_tracked)
+    if f_carrier!="All":qf=flt(qf,'Carrier Name',f_carrier,True)
 
-    st.divider()
+    # ── KPIs ────────────────────────────────────────────────
+    tot=len(a)
+    if tot==0:st.warning("No data matches filters.");return
+    tl=[su(v) for v in a['Tracked'].tolist()];sl=[ss(v) for v in a['Tracked Status'].tolist()]
+    tt=sum(1 for v in tl if v=='TRUE');ft=sum(1 for v in sl if v=='Full Tracked')
+    pt=sum(1 for v in sl if v=='Partial Tracked');zm=sum(1 for v in sl if v=='Tracked with 0 milestones')
+    tp=tt/tot*100;fp=ft/tot*100;untrk=tot-tt
 
-    # ── Tabs ────────────────────────────────────────────────
-    tab1, tab2, tab3 = st.tabs(["📡 Tracking Data", "🎯 Milestone Data", "📋 Processed Data"])
+    st.markdown(f"""<div class="kpi-row">
+    <div class="kpi k-blue"><div class="kv">{tot:,}</div><div class="kl">Total Shipments</div></div>
+    <div class="kpi k-green"><div class="kv">{tp:.1f}%</div><div class="kl">Tracked</div><div class="kd">{tt:,} shipments</div></div>
+    <div class="kpi k-emerald"><div class="kv">{fp:.1f}%</div><div class="kl">Full Track Rate</div><div class="kd">Tracked with all milestones</div></div>
+    <div class="kpi k-orange"><div class="kv">{pt:,}</div><div class="kl">Partial Tracked</div><div class="kd">Missing 1+ milestones</div></div>
+    <div class="kpi k-red"><div class="kv">{zm:,}</div><div class="kl">Untracked</div><div class="kd">0 milestones received</div></div>
+    <div class="kpi k-purple"><div class="kv">{ft:,}</div><div class="kl">Fully Tracked</div><div class="kd">All 4 milestones</div></div>
+    </div>""",unsafe_allow_html=True)
 
-    # ════════════════════════════════════════════════════════
-    # TAB 1: TRACKING DATA
-    # ════════════════════════════════════════════════════════
+    tab1,tab2,tab3=st.tabs(["📡 Tracking Data","🎯 Milestone Data","📋 Processed Data"])
+
+    # ═══════════ TAB 1 ═══════════════════════════════════════
     with tab1:
-        # Export button
-        tracking_excel = to_excel_download({
-            'DQ-Tracking Summary': build_tracking_summary(analysis_df),
-            'Tracking by Carrier': build_tracking_carrier(analysis_df),
-            'Tracking Detail': analysis_df[['Carrier Name','Bill of Lading','Order Number','Tracked','Connection Type','Tracking Method','Lanes','Pickup Location','Destination Location','Final Status Reason','Tracked Status']].copy(),
-        }, 'tracking')
-        st.download_button("⬇ Export Tracking Report", tracking_excel, "DQ-Tracking-Report.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        c1,c2=st.columns(2)
+        with c1:
+            st.markdown('<div class="card"><div class="card-h"><h3>Tracking Rate</h3></div><div class="card-b" style="padding:10px 16px">',unsafe_allow_html=True)
+            st.plotly_chart(ch_track(a),use_container_width=True,config={'displayModeBar':False})
+            st.markdown('</div></div>',unsafe_allow_html=True)
+        with c2:
+            st.markdown('<div class="card"><div class="card-h"><h3>Top Carriers by Status</h3></div><div class="card-b" style="padding:10px 16px">',unsafe_allow_html=True)
+            st.plotly_chart(ch_carrier(a),use_container_width=True,config={'displayModeBar':False})
+            st.markdown('</div></div>',unsafe_allow_html=True)
 
-        col1, col2 = st.columns(2)
+        c3,c4=st.columns(2)
+        with c3:
+            st.markdown('<div class="card"><div class="card-h"><h3>DQ-Tracking Summary</h3></div><div class="card-b">',unsafe_allow_html=True)
+            ts=pv_track(a);td=ts.copy();cm={'TRUE':'#00875a','FALSE':'#de350b'}
+            td['Tracked']=[b_tr(v) if v!='Grand Total' else f'<b>{v}</b>' for v in ts['Tracked'].tolist()]
+            td['Shipment %']=[pbar(ts.iloc[i]['Shipments']/tot*100,cm.get(ss(ts.iloc[i]['Tracked']),'#666')) if ss(ts.iloc[i]['Tracked'])!='Grand Total' else '<b>100%</b>' for i in range(len(ts))]
+            st.markdown(ht(td,180),unsafe_allow_html=True)
+            st.markdown('</div></div>',unsafe_allow_html=True)
+        with c4:
+            st.markdown('<div class="card"><div class="card-h"><h3>Tracking by Carrier</h3></div><div class="card-b">',unsafe_allow_html=True)
+            tc=pv_track_carr(a);tcd=tc.copy();tcd['Tracked']=[b_tr(v) for v in tc['Tracked'].tolist()]
+            st.markdown(ht(tcd,220),unsafe_allow_html=True)
+            st.markdown('</div></div>',unsafe_allow_html=True)
 
-        with col1:
-            st.markdown('<div class="section-card"><h3>DQ-Tracking Summary</h3>', unsafe_allow_html=True)
-            summary = build_tracking_summary(analysis_df)
-            st.dataframe(summary, use_container_width=True, hide_index=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="card"><div class="card-h"><h3>Tracking Detail</h3><span class="cnt">{len(a):,} shipments</span></div><div class="card-b">',unsafe_allow_html=True)
+        cols=['Carrier Name','Bill of Lading','Tracked','Connection Type','Tracking Method','Pickup Location','Destination Location','Lanes','Final Status Reason','Tracked Status','Tracking Error']
+        dd=a[cols].copy();dd['Tracked']=[b_tr(v) for v in dd['Tracked'].tolist()];dd['Tracked Status']=[b_st(v) for v in dd['Tracked Status'].tolist()]
+        st.markdown(ht(dd,420),unsafe_allow_html=True)
+        st.markdown('</div></div>',unsafe_allow_html=True)
+        st.download_button("⬇ Export Filtered Tracking Data",to_xl({'Tracking Detail':a}),"Tracking-Filtered.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_t")
 
-        with col2:
-            st.markdown('<div class="section-card"><h3>Tracking by Carrier</h3>', unsafe_allow_html=True)
-            carrier_summary = build_tracking_carrier(analysis_df)
-            st.dataframe(carrier_summary, use_container_width=True, hide_index=True, height=300)
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        # Detail table with filters
-        st.markdown("### Tracking Detail")
-        fc1, fc2, fc3 = st.columns([2, 3, 2])
-        with fc1:
-            tracked_filter = st.selectbox("Tracked", ["All", "TRUE", "FALSE"], key="t_tracked")
-        with fc2:
-            carriers = ['All'] + sorted(analysis_df['Carrier Name'].dropna().unique().tolist())
-            carrier_filter = st.selectbox("Carrier", carriers, key="t_carrier")
-
-        detail = analysis_df.copy()
-        if tracked_filter != "All":
-            detail = detail[detail['Tracked'].astype(str).str.upper() == tracked_filter]
-        if carrier_filter != "All":
-            detail = detail[detail['Carrier Name'] == carrier_filter]
-
-        tracking_cols = ['Carrier Name', 'Bill of Lading', 'Tracked', 'Connection Type', 'Tracking Method',
-                         'Pickup Location', 'Destination Location', 'Lanes', 'Final Status Reason', 'Tracked Status']
-        # Add tracking error from query_df
-        detail_display = detail[tracking_cols].copy()
-        st.caption(f"{len(detail_display)} shipments")
-        st.dataframe(detail_display, use_container_width=True, hide_index=True, height=400)
-
-    # ════════════════════════════════════════════════════════
-    # TAB 2: MILESTONE DATA
-    # ════════════════════════════════════════════════════════
+    # ═══════════ TAB 2 ═══════════════════════════════════════
     with tab2:
-        milestone_excel = to_excel_download({
-            'DQ-Milestone Summary': build_milestone_summary(analysis_df),
-            'P44 RCA': build_rca(analysis_df),
-            'Milestone by Carrier': build_milestone_carrier(analysis_df),
-            'Lane Analysis': build_lane_analysis(analysis_df),
-            'Milestone Detail': analysis_df.copy(),
-        }, 'milestone')
-        st.download_button("⬇ Export Milestone Report", milestone_excel, "DQ-Milestone-Report.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        c1,c2=st.columns(2)
+        with c1:
+            st.markdown('<div class="card"><div class="card-h"><h3>Milestone Completeness</h3></div><div class="card-b" style="padding:10px 16px">',unsafe_allow_html=True)
+            st.plotly_chart(ch_ms(a),use_container_width=True,config={'displayModeBar':False})
+            st.markdown('</div></div>',unsafe_allow_html=True)
+        with c2:
+            st.markdown('<div class="card"><div class="card-h"><h3>P44 Root Cause Analysis</h3></div><div class="card-b" style="padding:10px 16px">',unsafe_allow_html=True)
+            st.plotly_chart(ch_rca(a),use_container_width=True,config={'displayModeBar':False})
+            st.markdown('</div></div>',unsafe_allow_html=True)
 
-        col1, col2 = st.columns(2)
+        c3,c4=st.columns(2)
+        with c3:
+            st.markdown('<div class="card"><div class="card-h"><h3>DQ-Milestone Summary</h3></div><div class="card-b">',unsafe_allow_html=True)
+            ms=pv_ms(a);md=ms.copy();cm2={'Full Tracked':'#00875a','Partial Tracked':'#ff8b00','Tracked with 0 milestones':'#de350b'}
+            md['Tracked Status']=[b_st(v) if v!='Grand Total' else f'<b>{v}</b>' for v in ms['Tracked Status'].tolist()]
+            md['Shipment %']=[pbar(ms.iloc[i]['Shipments']/tot*100,cm2.get(ss(ms.iloc[i]['Tracked Status']),'#666')) if ss(ms.iloc[i]['Tracked Status'])!='Grand Total' else '<b>100%</b>' for i in range(len(ms))]
+            st.markdown(ht(md,180),unsafe_allow_html=True)
+            st.markdown('</div></div>',unsafe_allow_html=True)
+        with c4:
+            st.markdown('<div class="card"><div class="card-h"><h3>P44 Root Cause Analysis</h3></div><div class="card-b">',unsafe_allow_html=True)
+            rc=pv_rca(a);rd=rc.copy();rd['P44 Analysis']=[b_p4(v) if ss(v)!='Grand Total' else f'<b>{v}</b>' for v in rc['P44 Analysis'].tolist()]
+            st.markdown(ht(rd,220),unsafe_allow_html=True)
+            st.markdown('</div></div>',unsafe_allow_html=True)
 
-        with col1:
-            st.markdown('<div class="section-card"><h3>DQ-Milestone Summary</h3>', unsafe_allow_html=True)
-            ms_summary = build_milestone_summary(analysis_df)
-            st.dataframe(ms_summary, use_container_width=True, hide_index=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+        c5,c6=st.columns(2)
+        with c5:
+            st.markdown('<div class="card"><div class="card-h"><h3>Milestone by Carrier</h3></div><div class="card-b">',unsafe_allow_html=True)
+            mc=pv_mc(a);mcd=mc.copy();mcd['Milestone Missed']=[b_mm(v) for v in mc['Milestone Missed'].tolist()]
+            st.markdown(ht(mcd,220),unsafe_allow_html=True)
+            st.markdown('</div></div>',unsafe_allow_html=True)
+        with c6:
+            st.markdown('<div class="card"><div class="card-h"><h3>Lane Analysis</h3></div><div class="card-b">',unsafe_allow_html=True)
+            la=pv_lane(a);lad=la.copy();lad['Milestone Missed']=[b_mm(v) for v in la['Milestone Missed'].tolist()]
+            st.markdown(ht(lad,220),unsafe_allow_html=True)
+            st.markdown('</div></div>',unsafe_allow_html=True)
 
-        with col2:
-            st.markdown('<div class="section-card"><h3>P44 Root Cause Analysis</h3>', unsafe_allow_html=True)
-            rca = build_rca(analysis_df)
-            st.dataframe(rca, use_container_width=True, hide_index=True, height=300)
-            st.markdown('</div>', unsafe_allow_html=True)
+        mcols=['Carrier Name','Bill of Lading','Tracked','Lanes','Pickup Location','Destination Location','Pickup Arrival Milestone (UTC)','Pickup Departure Milestone (UTC)','Final Destination Arrival Milestone (UTC)','Final Destination Departure Milestone (UTC)','Final Status Reason','Tracked Status','Milestone Achieved','Milestone Missed','p44 Analysis']
+        st.markdown(f'<div class="card"><div class="card-h"><h3>Milestone Detail</h3><span class="cnt">{len(a):,} shipments</span></div><div class="card-b">',unsafe_allow_html=True)
+        mdd=a[mcols].copy();mdd['Tracked']=[b_tr(v) for v in mdd['Tracked'].tolist()];mdd['Tracked Status']=[b_st(v) for v in mdd['Tracked Status'].tolist()]
+        mdd['Milestone Missed']=[b_mm(v) for v in mdd['Milestone Missed'].tolist()];mdd['p44 Analysis']=[b_p4(v) for v in mdd['p44 Analysis'].tolist()]
+        st.markdown(ht(mdd,420),unsafe_allow_html=True)
+        st.markdown('</div></div>',unsafe_allow_html=True)
+        st.download_button("⬇ Export Filtered Milestone Data",to_xl({'Milestone Detail':a}),"Milestone-Filtered.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_m")
 
-        col3, col4 = st.columns(2)
-
-        with col3:
-            st.markdown('<div class="section-card"><h3>Milestone by Carrier</h3>', unsafe_allow_html=True)
-            ms_carrier = build_milestone_carrier(analysis_df)
-            st.dataframe(ms_carrier, use_container_width=True, hide_index=True, height=300)
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        with col4:
-            st.markdown('<div class="section-card"><h3>Lane Analysis</h3>', unsafe_allow_html=True)
-            lane = build_lane_analysis(analysis_df)
-            st.dataframe(lane, use_container_width=True, hide_index=True, height=300)
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        # Milestone Detail
-        st.markdown("### Milestone Detail")
-        mc1, mc2, mc3 = st.columns([2, 3, 2])
-        with mc1:
-            statuses = ['All', 'Full Tracked', 'Partial Tracked', 'Tracked with 0 milestones']
-            ms_status_filter = st.selectbox("Tracked Status", statuses, key="m_status")
-        with mc2:
-            ms_carrier_filter = st.selectbox("Carrier", carriers, key="m_carrier")
-
-        ms_detail = analysis_df.copy()
-        if ms_status_filter != "All":
-            ms_detail = ms_detail[ms_detail['Tracked Status'] == ms_status_filter]
-        if ms_carrier_filter != "All":
-            ms_detail = ms_detail[ms_detail['Carrier Name'] == ms_carrier_filter]
-
-        ms_cols = ['Carrier Name', 'Bill of Lading', 'Tracked', 'Lanes', 'Pickup Location', 'Destination Location',
-                   'Pickup Arrival Milestone (UTC)', 'Pickup Departure Milestone (UTC)',
-                   'Final Destination Arrival Milestone (UTC)', 'Final Destination Departure Milestone (UTC)',
-                   'Final Status Reason', 'Tracked Status', 'Milestone Achieved', 'Milestone Missed', 'p44 Analysis']
-        st.caption(f"{len(ms_detail)} shipments")
-        st.dataframe(ms_detail[ms_cols], use_container_width=True, hide_index=True, height=400)
-
-    # ════════════════════════════════════════════════════════
-    # TAB 3: PROCESSED DATA
-    # ════════════════════════════════════════════════════════
+    # ═══════════ TAB 3 ═══════════════════════════════════════
     with tab3:
-        full_excel = to_excel_download({
-            'Query': query_df,
-            'Data Analysis': analysis_df,
-            'DQ-Tracking Summary': build_tracking_summary(analysis_df),
-            'Tracking by Carrier': build_tracking_carrier(analysis_df),
-            'DQ-Milestone Summary': build_milestone_summary(analysis_df),
-            'P44 RCA': build_rca(analysis_df),
-            'Lane Analysis': build_lane_analysis(analysis_df),
-            'Milestone by Carrier': build_milestone_carrier(analysis_df),
-        }, 'full')
-        st.download_button("⬇ Export All to Excel", full_excel, "DQ-Report-Full.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.markdown(f'<div class="card"><div class="card-h"><h3>Full Processed Data (Query Sheet)</h3><span class="cnt">{len(qf):,} shipments</span></div><div class="card-b">',unsafe_allow_html=True)
+        rdd=qf.copy();rdd['Tracked']=[b_tr(v) for v in rdd['Tracked'].tolist()]
+        st.markdown(ht(rdd,520),unsafe_allow_html=True)
+        st.markdown('</div></div>',unsafe_allow_html=True)
+        st.download_button("⬇ Export Filtered Data",to_xl({'Processed Data':qf}),"Processed-Filtered.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_r")
 
-        st.markdown("### Full Processed Data (Query Sheet)")
-        rc1, rc2, rc3 = st.columns([2, 3, 2])
-        with rc1:
-            raw_tracked = st.selectbox("Tracked", ["All", "TRUE", "FALSE"], key="r_tracked")
-        with rc2:
-            raw_carrier = st.selectbox("Carrier", carriers, key="r_carrier")
-
-        raw_display = query_df.copy()
-        if raw_tracked != "All":
-            raw_display = raw_display[raw_display['Tracked'].astype(str).str.upper() == raw_tracked]
-        if raw_carrier != "All":
-            raw_display = raw_display[raw_display['Carrier Name'] == raw_carrier]
-
-        st.caption(f"{len(raw_display)} shipments")
-        st.dataframe(raw_display, use_container_width=True, hide_index=True, height=500)
-
-
-# ──────────────────────────────────────────────────────────────
-# PIVOT BUILDERS
-# ──────────────────────────────────────────────────────────────
-def build_tracking_summary(df):
-    total = len(df)
-    groups = df['Tracked'].astype(str).str.upper().value_counts().reset_index()
-    groups.columns = ['Tracked', 'Shipments']
-    groups['Shipment %'] = (groups['Shipments'] / total * 100).round(1).astype(str) + '%'
-    grand = pd.DataFrame([{'Tracked': 'Grand Total', 'Shipments': total, 'Shipment %': '100%'}])
-    return pd.concat([groups, grand], ignore_index=True)
-
-
-def build_tracking_carrier(df):
-    total = len(df)
-    groups = df.groupby([df['Tracked'].astype(str).str.upper(), 'Carrier Name']).size().reset_index(name='Shipments')
-    groups.columns = ['Tracked', 'Carrier Name', 'Shipments']
-    groups = groups.sort_values('Shipments', ascending=False)
-    groups['Shipment %'] = (groups['Shipments'] / total * 100).round(1).astype(str) + '%'
-    return groups
-
-
-def build_milestone_summary(df):
-    total = len(df)
-    order = ['Full Tracked', 'Partial Tracked', 'Tracked with 0 milestones']
-    groups = df['Tracked Status'].value_counts().reindex(order, fill_value=0).reset_index()
-    groups.columns = ['Tracked Status', 'Shipments']
-    groups['Shipment %'] = (groups['Shipments'] / total * 100).round(1).astype(str) + '%'
-    grand = pd.DataFrame([{'Tracked Status': 'Grand Total', 'Shipments': total, 'Shipment %': '100%'}])
-    return pd.concat([groups, grand], ignore_index=True)
-
-
-def build_rca(df):
-    total = len(df)
-    groups = df['p44 Analysis'].value_counts().reset_index()
-    groups.columns = ['P44 Analysis', 'Shipments']
-    groups['Shipment %'] = (groups['Shipments'] / total * 100).round(1).astype(str) + '%'
-    grand = pd.DataFrame([{'P44 Analysis': 'Grand Total', 'Shipments': total, 'Shipment %': '100%'}])
-    return pd.concat([groups, grand], ignore_index=True)
-
-
-def build_milestone_carrier(df):
-    total = len(df)
-    groups = df.groupby(['Carrier Name', 'Milestone Missed']).size().reset_index(name='Shipments')
-    groups = groups.sort_values('Shipments', ascending=False)
-    groups['Shipment %'] = (groups['Shipments'] / total * 100).round(1).astype(str) + '%'
-    return groups
-
-
-def build_lane_analysis(df):
-    total = len(df)
-    groups = df.groupby(['Lanes', 'Carrier Name', 'Milestone Missed']).size().reset_index(name='Shipments')
-    groups = groups.sort_values('Shipments', ascending=False)
-    groups['Shipment %'] = (groups['Shipments'] / total * 100).round(1).astype(str) + '%'
-    return groups
-
-
-# ──────────────────────────────────────────────────────────────
-if __name__ == '__main__':
+if __name__=='__main__':
     main()
